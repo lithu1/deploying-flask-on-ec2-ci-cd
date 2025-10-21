@@ -1,0 +1,48 @@
+name: CI/CD - DrViKi EC2 Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t drviki-app .
+
+      - name: Run container
+        run: docker run -d -p 8080:8080 --name drviki-app drviki-app
+
+      - name: Test container
+        run: |
+          sleep 5
+          curl -sSf http://localhost:8080 || (echo "App failed to respond" && exit 1)
+
+      - name: Stop test container
+        run: docker stop drviki-app && docker rm drviki-app
+
+      - name: Deploy to AWS EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            echo "🚀 Deploying Dr. ViKi App on EC2..."
+            sudo docker stop drviki-app || true
+            sudo docker rm drviki-app || true
+            cd /home/ubuntu
+            if [ ! -d "drviki-pipeline" ]; then
+              git clone https://github.com/${{ github.repository }} drviki-pipeline
+            fi
+            cd drviki-pipeline
+            git pull origin main
+            sudo docker build -t drviki-app .
+            sudo docker run -d --name drviki-app -p 80:8080 drviki-app
+            echo "✅ Deployment complete. App running on port 80."
